@@ -3,8 +3,11 @@ import psycopg2
 from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Explicitly configures Flask to view the root folder as the template directory
-app = Flask(__name__, template_folder='.')
+# Get the absolute, exact path of the current folder on the server
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+# Force Flask to look in this exact folder for your HTML files
+app = Flask(__name__, template_folder=BASE_DIR)
 app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_dev_key')
 
 def get_db_conn():
