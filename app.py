@@ -1,135 +1,132 @@
-import streamlit as st
+import os
 import psycopg2
+from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
-st.set_page_config(page_title="EireCourse Hub")
+app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_dev_key')
 
 def get_db_conn():
-    return psycopg2.connect(st.secrets["DATABASE_URL"])
+    # Render will pull this exactly from your environment variables
+    db_url = os.environ.get('DATABASE_URL')
+    return psycopg2.connect(db_url)
 
-if 'user_pps' not in st.session_state:
-    st.session_state.user_pps = None
-
-st.title("EireCourse Hub")
-
-# Connect to database
-conn = get_db_conn()
-cursor = conn.cursor()
-
-# --- MAIN PAGE: SEARCH & REGISTER ---
-search_query = st.text_input("Search courses by name, town, or county:")
-
-query = """
-    SELECT c.course_id, c.course_name, c.description, l.town, l.county 
-    FROM courses c
-    JOIN course_locations l ON c.location_id = l.location_id
-"""
-if search_query:
-    query += f" WHERE c.course_name ILIKE '%{search_query}%' OR l.town ILIKE '%{search_query}%' OR l.county ILIKE '%{search_query}%'"
-
-cursor.execute(query)
-courses = cursor.fetchall()
-
-st.subheader("Available Courses")
-for row in courses:
-    st.write(f"**{row[1]}** — {row[3]}, Co. {row[4]}")
-    st.write(row[2])
-    
-    if st.session_state.user_pps:
-        if st.button(f"Register for {row[1]}", key=row[0]):
-            try:
-                cursor.execute("INSERT INTO registrations (pps_number, course_id) VALUES (%s, %s)", (st.session_state.user_pps, row[0]))
-                conn.commit()
-                st.success("Successfully registered!")
-            except psycopg2.IntegrityError:
-                conn.rollback()
-                st.warning("You are already registered.")
-    else:
-        st.write("*Log in via the sidebar to register.*")
-    st.divider()
-
-# --- SIDEBAR: ROS-STYLE LOGIN / REGISTRATION ---
-st.sidebar.title("Account Dashboard")
-
-if st.session_state.user_pps:
-    st.sidebar.write(f"Logged in as: **{st.session_state.user_pps}**")
-    if st.sidebar.button("Log Out"):
-        st.session_state.user_pps = None
+@app.route('/')
+def index():
+    search_query = request.args.get('search', '')
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        
+        if search_query:
+            cursor.execute("""
+                SELECT c.course_id, c.course_name, c.description, l.town, l.county 
+                FROM courses c
+                JOIN course_locations l ON c.location_id = l.location_id
+                WHERE c.course_name ILIKE %s OR l.town ILIKE %s OR l.county ILIKE %s
+            """, (f'%{search_query}%', f'%{search_query}%', f'%{search_query}%'))
+        else:
+            cursor.execute("""
+                SELECT c.course_id, c.course_name, c.description, l.town, l.county 
+                FROM courses c
+                JOIN course_locations l ON c.location_id = l.location_id
+            """)
+        
+        courses = cursor.fetchall()
         cursor.close()
         conn.close()
-        st.rerun()
-else:
-    login_tab, register_tab = st.sidebar.tabs(["Sign In", "Create Account"])
-    
-    # 1. ROS-Style Dual Gateway
-    with login_tab:
-        st.write("Sign In Gateway")
-        auth_method = st.radio("Method:", ["PPSN & DOB", "GovID"])
+        return render_template('index.html', courses=courses, search_query=search_query)
+    except Exception as e:
+        # If the database fails, this prints the REAL error to the screen
+        return f"Database Error: {str(e)}"
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        auth_method = request.form.get('auth_method')
+        conn = get_db_conn()
+        cursor = conn.cursor()
         
-        if auth_method == "PPSN & DOB":
-            pps_input = st.text_input("PPS Number")
-            dob_input = st.date_input("Date of Birth")
-            pass_input = st.text_input("Password", type="password")
-            
-            if st.button("Sign In"):
-                cursor.execute("SELECT pps_number, date_of_birth, password_hash FROM users WHERE pps_number = %s", (pps_input,))
-                user = cursor.fetchone()
-                
-                if user and str(user[1]) == str(dob_input) and check_password_hash(user[2], pass_input):
-                    st.session_state.user_pps = user[0]
-                    cursor.close()
-                    conn.close()
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials.")
-                
+        if auth_method == 'govid':
+            govid = request.form.get('govid')
+            cursor.execute("SELECT pps_number FROM users WHERE govid = %s", (govid,))
+            user = cursor.fetchone()
+            if user:
+                session['user_pps'] = user[0]
+                return redirect(url_for('index'))
         else:
-            govid_input = st.text_input("GovID")
-            if st.button("Sign In via GovID"):
-                cursor.execute("SELECT pps_number FROM users WHERE govid = %s", (govid_input,))
-                user = cursor.fetchone()
-                if user:
-                    st.session_state.user_pps = user[0]
-                    cursor.close()
-                    conn.close()
-                    st.rerun()
-                else:
-                    st.error("GovID not found.")
+            pps = request.form.get('pps')
+            dob = request.form.get('dob')
+            password = request.form.get('password')
+            
+            cursor.execute("SELECT pps_number, date_of_birth, password_hash FROM users WHERE pps_number = %s", (pps,))
+            user = cursor.fetchone()
+            
+            if user and str(user[1]) == dob and check_password_hash(user[2], password):
+                session['user_pps'] = user[0]
+                return redirect(url_for('index'))
+                
+        return "Authentication Failed. <a href='/login'>Try again</a>", 401
+        
+    return render_template('login.html')
 
-    # 2. 5-Column Address Registration
-    with register_tab:
-        st.write("New Account")
-        with st.form("register_form"):
-            new_pps = st.text_input("PPS Number (Required)")
-            new_dob = st.date_input("Date of Birth")
-            new_pass = st.text_input("Password (Required)", type="password")
-            new_govid = st.text_input("GovID (Optional)")
+@app.route('/register_account', methods=['GET', 'POST'])
+def register_account():
+    if request.method == 'POST':
+        pps = request.form.get('pps')
+        dob = request.form.get('dob')
+        password = generate_password_hash(request.form.get('password'))
+        govid = request.form.get('govid') or None
+        
+        line1 = request.form.get('line1')
+        line2 = request.form.get('line2')
+        town = request.form.get('town')      
+        county = request.form.get('county')  
+        eircode = request.form.get('eircode')
+        
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO users (pps_number, date_of_birth, password_hash, govid, line1, line2, town, county, eircode)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (pps, dob, password, govid, line1, line2, town, county, eircode))
+            conn.commit()
+            session['user_pps'] = pps
+            return redirect(url_for('index'))
+        except Exception as e:
+            return f"Registration Error: {str(e)}", 400
+        finally:
+            cursor.close()
+            conn.close()
             
-            st.write("Address (5 Columns)")
-            line1 = st.text_input("Line 1")
-            line2 = st.text_input("Line 2")
-            town = st.text_input("Town (3rd Column)")
-            county = st.text_input("County (4th Column)")
-            eircode = st.text_input("Eircode (5th Column)")
-            
-            submit = st.form_submit_button("Register")
-            
-            if submit:
-                hashed_pw = generate_password_hash(new_pass)
-                try:
-                    cursor.execute("""
-                        INSERT INTO users (pps_number, date_of_birth, password_hash, govid, line1, line2, town, county, eircode)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (new_pps, new_dob, hashed_pw, new_govid or None, line1, line2, town, county, eircode))
-                    conn.commit()
-                    st.success("Registered! You can now sign in.")
-                except psycopg2.Error:
-                    conn.rollback()
-                    st.error("Registration failed. PPS may already exist.")
+    return render_template('register_account.html')
 
-# Clean up connection
-try:
-    cursor.close()
-    conn.close()
-except:
-    pass
+@app.route('/enroll/<int:course_id>', methods=['POST'])
+def enroll(course_id):
+    if 'user_pps' not in session:
+        return redirect(url_for('login'))
+        
+    conn = get_db_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO registrations (pps_number, course_id) 
+            VALUES (%s, %s)
+        """, (session['user_pps'], course_id))
+        conn.commit()
+        return "Successfully Registered! <a href='/'>Go Home</a>"
+    except:
+        return "Already registered for this course. <a href='/'>Go Home</a>"
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/logout')
+def logout():
+    session.pop('user_pps', None)
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

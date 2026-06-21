@@ -1,0 +1,14 @@
+<!DOCTYPE html><html><body>
+    <h2>Sign In (ROS Style)</h2>
+    <form method="POST" action="/login">
+        <label><input type="radio" name="auth_method" value="pps" checked onclick="document.getElementById('pps_s').style.display='block'; document.getElementById('gov_s').style.display='none';"> PPSN & DOB</label>
+        <label><input type="radio" name="auth_method" value="govid" onclick="document.getElementById('pps_s').style.display='none'; document.getElementById('gov_s').style.display='block';"> GovID</label><br><br>
+        <div id="pps_s">
+            <input type="text" name="pps" placeholder="PPS Number" required><br>
+            <input type="date" name="dob" required><br>
+            <input type="password" name="password" placeholder="Password"><br>
+        </div>
+        <div id="gov_s" style="display:none;"><input type="text" name="govid" placeholder="GovID"></div>
+        <br><button type="submit">Sign In</button>
+    </form>
+</body></html>
