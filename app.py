@@ -3,11 +3,11 @@ import psycopg2
 from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
-app = Flask(__name__)
+# Explicitly configures Flask to view the root folder as the template directory
+app = Flask(__name__, template_folder='.')
 app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_dev_key')
 
 def get_db_conn():
-    # Render will pull this exactly from your environment variables
     db_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(db_url)
 
@@ -37,7 +37,6 @@ def index():
         conn.close()
         return render_template('index.html', courses=courses, search_query=search_query)
     except Exception as e:
-        # If the database fails, this prints the REAL error to the screen
         return f"Database Error: {str(e)}"
 
 @app.route('/login', methods=['GET', 'POST'])

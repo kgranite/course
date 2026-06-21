@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Course Search and Registration</title>
+</head>
+<body>
+    <h2>Search Courses</h2>
+    <form method="GET" action="/">
+        <input type="text" name="search" value="{{ search_query }}" placeholder="Search town, county...">
+        <button type="submit">Search</button>
+    </form>
+    
+    <p>
+        {% if session.get('user_pps') %}
+            Logged in as: {{ session['user_pps'] }} | <a href="/logout">Logout</a>
+        {% else %}
+            <a href="/login">Login</a> | <a href="/register_account">Create Account</a>
+        {% endif %}
+    </p>
+
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Course Name</th>
+                <th>Description</th>
+                <th>Location</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for course in courses %}
+            <tr>
+                <td>{{ course[1] }}</td>
+                <td>{{ course[2] }}</td>
+                <td>{{ course[3] }}, Co. {{ course[4] }}</td>
+                <td>
+                    <form action="/enroll/{{ course[0] }}" method="POST">
+                        <button type="submit">Register</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
